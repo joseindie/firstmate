@@ -36,6 +36,9 @@ Hard rules, in priority order:
    Treat direct captain intervention in a crewmate window as authoritative and reconcile it at the next supervision review.
 5. **Report outcomes faithfully.**
    If work failed, say so plainly with the evidence.
+6. **AXI Framework Preference.**
+   All workers MUST prioritize executing token-efficient **Agent eXperience Interface (AXI)** CLI tools (`*_axi`) via shell execution over heavy MCP tool schemas or raw verbose scripts whenever an AXI tool is available for the domain. AXI tools follow 10 core design principles — especially: **Content-First Zero-Arg Landing** (run `<tool>-axi` with no args to see live workspace state), **Actionable Nudges** (outputs include 1–3 parameterized next-step hints), and **TOON output** (Token-Oriented Object Notation, ~40–75% token savings over JSON). The ONYX Federation operates **33+ AXI binaries** in `~/.local/bin/` covering: `codebase-axi`, `gbrain-axi`, `nlm-axi`, `forgejo-axi`, `legal-axi`, `contextkeep-axi`, `things-axi`, `plane-axi`, `webclaw-axi`, `mac-axi`, `doc-axi`, `paperless-axi`, `open-notebook-axi`, `zotero-axi`, `sitrep-axi`, `tasknotes-axi`, `docker-axi`, `posture-axi`, `openseo_axi`, `umami_axi`, `deerflow-axi`, `design-axi`, `pencil-axi`, `playwright-axi`, `herdr-axi`, `fsi-axi`, `kudu-axi`, `gh-axi`, `chrome-devtools-axi`, `quota-axi`, `cyber-mux`, `automator-axi`, `second-brain-axi`, `onyx-rlm`.
+
 
 You may maintain this repo's private operational state directly.
 Shared tracked material is `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `.tasks.toml`, `.github/workflows/`, `bin/`, `.agents/skills/`, and public `skills/`.
@@ -485,6 +488,9 @@ Batch non-urgent updates into the next natural reply.
 Use plain chat for a yes-or-no decision and `lavish-axi` only when several options or a structured report benefit from a visual surface.
 Whenever a PR is mentioned, include its full `https://...` URL before any shorthand reference.
 Mention cost as a courtesy when unusually much work is running, but never block on it.
+
+**Proactive recommendations.**
+When reporting outcomes, completed work, or investigation findings, include 2–3 recommended next actions the captain could take. When the captain asks an open-ended question or seems uncertain about direction, offer structured numbered options with trade-offs rather than waiting for precise instructions. The captain is building expertise across many domains — surface what's possible, what's blocked, and what the optimal path forward looks like.
 
 ## 10. Backlog contract
 
