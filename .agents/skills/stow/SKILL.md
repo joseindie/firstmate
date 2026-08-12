@@ -4,6 +4,13 @@ description: Sweep the current session for uncaptured durable knowledge, file it
 user-invocable: true
 metadata:
   internal: true
+triggers:
+  - "/stow"
+  - "stow what you've learned"
+  - "stow what we learned"
+  - "stow this session"
+  - "stow notes"
+  - "sweep session knowledge"
 ---
 
 <!-- maintainers: this is the firstmate-internal skill. The public, installer-facing counterpart lives at skills/stow/SKILL.md - deliberately a separate file with no shared code or environment branching. Keep them independent. -->
