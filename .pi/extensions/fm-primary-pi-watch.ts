@@ -370,6 +370,7 @@ export default function (pi: ExtensionAPI) {
 
   async function retireArm(armChild: ChildProcess | null): Promise<boolean> {
     if (!armChild) return true;
+    if (child === armChild) child = null;
     armChild.kill("SIGTERM");
     const closed = armClose.get(armChild);
     if (!closed) return false;
@@ -470,7 +471,7 @@ export default function (pi: ExtensionAPI) {
       FM_WATCH_ARM_SCRIPT: armScript,
       FM_WATCH_PREDECESSOR_ARM_PID: predecessorArmPid,
     };
-    const armChild = spawn("bash", ["-lc", "config_dir=\"${FM_CONFIG_OVERRIDE:-$FM_HOME/config}\"; [ -f \"$config_dir/x-mode.env\" ] && . \"$config_dir/x-mode.env\"; exec \"$FM_WATCH_ARM_SCRIPT\" --restart"], {
+    const armChild = spawn("bash", ["-c", "config_dir=\"${FM_CONFIG_OVERRIDE:-$FM_HOME/config}\"; [ -f \"$config_dir/x-mode.env\" ] && . \"$config_dir/x-mode.env\"; exec \"$FM_WATCH_ARM_SCRIPT\" --restart"], {
       cwd: fmRoot,
       env,
       stdio: ["ignore", "pipe", "pipe"],
