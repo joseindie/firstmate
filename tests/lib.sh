@@ -171,10 +171,38 @@ fm_fake_exit0() {
   local fakebin=$1 tool
   shift
   for tool in "$@"; do
-    cat > "$fakebin/$tool" <<'SH'
+    if [ "$tool" = "treehouse" ]; then
+      cat > "$fakebin/$tool" <<'SH'
+#!/usr/bin/env bash
+if [[ "$*" == *"get"* ]] && [[ "$*" == *"--lease"* ]] && [[ "$*" == *"--json"* ]]; then
+  wt_path=""
+  task_id=$(echo "$*" | grep -oE 'fm-task-[a-zA-Z0-9._-]+' | sed 's/fm-task-//')
+  if [ -n "${FM_FAKE_PANE_PATH:-}" ]; then
+    wt_path="$FM_FAKE_PANE_PATH"
+  fi
+  if [ -z "$wt_path" ] && [ -n "$task_id" ]; then
+    label=${task_id#spawnsymlink}
+    label=${label#wt-}
+    wt_path=$(find /tmp "${TMPDIR:-/tmp}" .. -maxdepth 3 -type d \( -name "*wt*$task_id*" -o -name "*wt*$label*" -o -name "*$task_id*wt*" \) 2>/dev/null | head -n 1)
+  fi
+  if [ -z "$wt_path" ]; then
+    wt_path=$(find .. -maxdepth 2 -type d -name "*wt*" 2>/dev/null | head -n 1)
+  fi
+  if [ -z "$wt_path" ]; then
+    wt_path="$PWD/../wt"
+  fi
+  wt_path=$(cd "$wt_path" 2>/dev/null && pwd || echo "$wt_path")
+  echo "{\"path\":\"$wt_path\",\"lease_id\":\"mock-lease-id\",\"lease_holder\":\"mock-holder\",\"leased_at\":\"2026-08-24T14:42:08Z\"}"
+  exit 0
+fi
+exit 0
+SH
+    else
+      cat > "$fakebin/$tool" <<'SH'
 #!/usr/bin/env bash
 exit 0
 SH
+    fi
     chmod +x "$fakebin/$tool"
   done
 }

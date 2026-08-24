@@ -324,6 +324,64 @@ fleet_sync() {
   rm -f "$tmp"
 }
 
+prewarm_treehouse_pools() {
+  command -v treehouse >/dev/null 2>&1 || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  local prewarm_count=2
+  if [ -f "$FM_HOME/config/treehouse-prewarm-count" ]; then
+    local val
+    val=$(cat "$FM_HOME/config/treehouse-prewarm-count" | tr -d '[:space:]')
+    if [[ "$val" =~ ^[0-9]+$ ]]; then
+      prewarm_count=$val
+    fi
+  fi
+  [ "$prewarm_count" -gt 0 ] || return 0
+
+  # Also read treehouse-pool-size and export TREEHOUSE_MAX_TREES
+  if [ -f "$FM_HOME/config/treehouse-pool-size" ]; then
+    local size_val
+    size_val=$(cat "$FM_HOME/config/treehouse-pool-size" | tr -d '[:space:]')
+    if [[ "$size_val" =~ ^[0-9]+$ ]]; then
+      export TREEHOUSE_MAX_TREES="$size_val"
+    fi
+  fi
+
+  local projects_dir="${FM_PROJECTS_OVERRIDE:-$FM_HOME/projects}"
+  [ -d "$projects_dir" ] || return 0
+
+  echo "treehouse: starting prewarm loop (target: $prewarm_count warm slots per project)..." >&2
+  local proj proj_name i=1 res path
+  for proj in "$projects_dir"/*; do
+    [ -d "$proj" ] || continue
+    # Verify it is a git repo
+    [ -d "$proj/.git" ] || git -C "$proj" rev-parse --git-dir >/dev/null 2>&1 || continue
+
+    proj_name=$(basename "$proj")
+    echo "treehouse: prewarming project $proj_name..." >&2
+
+    # We want to prewarm by getting a lease and returning it immediately.
+    i=1
+    while [ "$i" -le "$prewarm_count" ]; do
+      if ! res=$(cd "$proj" && treehouse get --lease --lease-holder "fm-prewarm" --json 2>/dev/null); then
+        echo "treehouse: pool limit or exhaustion reached for $proj_name at slot $i" >&2
+        break
+      fi
+      path=$(echo "$res" | jq -r '.path' 2>/dev/null)
+      if [ -n "$path" ] && [ -d "$path" ]; then
+        if ! (cd "$proj" && treehouse return "$path" --force >/dev/null 2>&1); then
+          echo "treehouse: failed to return prewarmed path $path for $proj_name" >&2
+        fi
+      else
+        echo "treehouse: failed to parse leased path from output for $proj_name" >&2
+        break
+      fi
+      i=$((i + 1))
+    done
+  done
+  echo "treehouse: prewarm loop complete." >&2
+}
+
 secondmate_sync() {
   # shellcheck source=bin/fm-wake-lib.sh disable=SC1091
   . "$SCRIPT_DIR/fm-wake-lib.sh"
@@ -1387,6 +1445,12 @@ if [ "${FM_BOOTSTRAP_DETECT_ONLY:-0}" != 1 ]; then
     wait "$fleet_sync_pid" || true
     cat "$fleet_sync_out"
     rm -f "$fleet_sync_out"
+
+    # Treehouse pools warm from freshly synced clones, so this stays after the
+    # background fleet-sync wait rather than overlapping it.
+    __fm_timing_stamp=$(fm_timing_now_ms)
+    prewarm_treehouse_pools
+    fm_timing_record phase treehouse-prewarm "$__fm_timing_stamp"
   fi
 fi
 local_phase && secondmate_handoff_detect

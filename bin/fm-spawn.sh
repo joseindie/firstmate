@@ -655,6 +655,8 @@ spawn_remote_secondmate() {
 }
 
 BACKEND=
+TREEHOUSE_LEASE_UNRECORDED=
+SPAWN_HERDR_RECLAIMED=0
 ORCA_ABORT_CLEANUP=0
 ORCA_WORKTREE_ID=
 ORCA_TERMINAL=
@@ -739,6 +741,13 @@ spawn_abort_cleanup() {
       "$HERDR_PROJECTION_ABORT_SESSION" \
       "$HERDR_PROJECTION_ABORT_TASK_PANE" \
       "$HERDR_PROJECTION_ABORT_SEEDED_PANE" || true
+  fi
+  if [ -n "${TREEHOUSE_LEASE_UNRECORDED:-}" ]; then
+    # The treehouse lease exists but no durable record of it does yet, so any
+    # exit in that window would strand a leased pool slot forever. Return it;
+    # after the meta commit the flag is cleared and teardown owns the lease.
+    (cd "${PROJ_ABS:-.}" && treehouse return --force "$TREEHOUSE_LEASE_UNRECORDED") >/dev/null 2>&1 || true
+    TREEHOUSE_LEASE_UNRECORDED=
   fi
   if [ "$HERDR_PRESENTATION_ORDER_LOCK_HELD" = 1 ]; then
     HERDR_PRESENTATION_ORDER_LOCK_HELD=0
@@ -1038,6 +1047,7 @@ if [ "$RELAUNCH" -eq 1 ]; then
   MODE=$(fm_meta_get "$RELAUNCH_META" mode)
   YOLO=$(fm_meta_get "$RELAUNCH_META" yolo)
   RELAUNCH_WT=$(fm_meta_get "$RELAUNCH_META" worktree)
+  TREEHOUSE_LEASE_ID=$(fm_meta_get "$RELAUNCH_META" treehouse_lease_id)
   [ -n "$RELAUNCH_WT" ] && [ -d "$RELAUNCH_WT" ] || {
     echo "error: task $ID's recorded worktree '${RELAUNCH_WT:-none}' is missing; refusing to relaunch without the local copy its work lives in" >&2
     exit 1
@@ -1928,6 +1938,49 @@ if [ "$RELAUNCH" -eq 1 ]; then
   WT_TARGET=$T
   SES=${T%%:*}
 else
+TREEHOUSE_LEASE_ID=""
+if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
+  # Inject TREEHOUSE_MAX_TREES from config/treehouse-pool-size if present
+  if [ -f "$FM_HOME/config/treehouse-pool-size" ]; then
+    size_val=$(cat "$FM_HOME/config/treehouse-pool-size" | tr -d '[:space:]')
+    if [[ "$size_val" =~ ^[0-9]+$ ]]; then
+      export TREEHOUSE_MAX_TREES="$size_val"
+    fi
+  fi
+
+  echo "treehouse: acquiring worktree lease for task $ID..." >&2
+  command -v treehouse >/dev/null 2>&1 || {
+    printf 'failed: treehouse not installed\n' >> "$STATE/$ID.status"
+    echo "error: treehouse is not installed; cannot lease an isolated worktree for task $ID" >&2
+    exit 1
+  }
+  # Run treehouse get --lease inside project root, with json output. Pool
+  # exhaustion exits non-zero with empty stdout (validated against v2.3.0:
+  # "all N worktrees are in use or dirty"), so this catch is the exhaustion abort.
+  if ! WT_JSON=$(cd "$PROJ_ABS" && treehouse get --lease --lease-holder "fm-task-$ID" --json 2>/dev/null); then
+    # On pool exhaustion, abort the spawn with status 'blocked: treehouse pool exhausted'
+    printf 'blocked: treehouse pool exhausted\n' >> "$STATE/$ID.status"
+    echo "error: treehouse pool exhausted; could not lease worktree" >&2
+    exit 1
+  fi
+  WT=$(echo "$WT_JSON" | jq -r '.path')
+  TREEHOUSE_LEASE_ID=$(echo "$WT_JSON" | jq -r '.lease_id')
+  if [ -z "$WT" ] || [ -z "$TREEHOUSE_LEASE_ID" ]; then
+    printf 'failed: treehouse lease parse failed\n' >> "$STATE/$ID.status"
+    echo "error: treehouse lease response was invalid or empty" >&2
+    exit 1
+  fi
+  TREEHOUSE_LEASE_UNRECORDED=$WT
+
+  validate_spawn_worktree "treehouse get" "pre-spawn"
+  freshen_spawn_worktree_base "$WT" || exit 1
+fi
+
+SPAWN_CWD=$PROJ_ABS
+if [ -n "$WT" ]; then
+  SPAWN_CWD=$WT
+fi
+
 case "$BACKEND" in
   tmux)
     SES=$(fm_backend_tmux_container_ensure)
@@ -1938,7 +1991,7 @@ case "$BACKEND" in
     # treehouse cd's into the worktree. WT_TARGET carries that stable id for the
     # rename-critical worktree-detection steps below; the persisted window= handle
     # stays $T (the name form), which is safe now that rename is disabled.
-    WID=$(fm_backend_tmux_create_task "$SES" "$W" "$PROJ_ABS") || exit 1
+    WID=$(fm_backend_tmux_create_task "$SES" "$W" "$SPAWN_CWD") || exit 1
     WT_TARGET="$WID"
     ;;
   herdr)
@@ -1996,6 +2049,7 @@ case "$BACKEND" in
           case "$HERDR_RECLAIM_STATUS" in
             0)
               HERDR_PROJECTED=1
+              SPAWN_HERDR_RECLAIMED=1
               HERDR_WORKSPACE_ID=$HERDR_RECOVERY_WORKSPACE_ID
               HERDR_SEEDED_DEFAULT_TAB_ID=""
               HERDR_TAB_ID=$FM_BACKEND_HERDR_PROJECTION_TAB_ID
@@ -2044,7 +2098,7 @@ case "$BACKEND" in
             HERDR_PROJECTION_ID=$(fm_backend_herdr_projection_journal_create "$STATE" "$ID") || exit 1
             HERDR_PROJECTION_LABEL=$(fm_backend_herdr_projection_workspace_label "$ID" "$HERDR_PROJECTION_ID")
             if ! FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_projection_create_task \
-              "$PROJ_ABS" "$HERDR_PROJECTION_LABEL" "$W"; then
+              "$SPAWN_CWD" "$HERDR_PROJECTION_LABEL" "$W"; then
               if [ "${FM_BACKEND_HERDR_PROJECTION_CLEANUP_SAFE:-0}" = 1 ]; then
                 HERDR_PROJECTION_ABORT_CLEANUP=1
                 HERDR_PROJECTION_ABORT_SESSION=$FM_BACKEND_HERDR_PROJECTION_SESSION
@@ -2097,7 +2151,7 @@ case "$BACKEND" in
       HERDR_SEEDED_DEFAULT_TAB_ID=${HERDR_CONTAINER_RAW#*$'\t'}
       HERDR_SES=${CONTAINER%%:*}
       HERDR_WORKSPACE_ID=${CONTAINER#*:}
-      HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$PROJ_ABS" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
+      HERDR_TASK_IDS=$(FM_HOME="$HERDR_LABEL_HOME" fm_backend_herdr_create_task "$CONTAINER" "$W" "$SPAWN_CWD" "$HERDR_SEEDED_DEFAULT_TAB_ID") || exit 1
       read -r HERDR_TAB_ID HERDR_PANE_ID <<EOF
 $HERDR_TASK_IDS
 EOF
@@ -2110,7 +2164,7 @@ EOF
     ;;
   zellij)
     ZELLIJ_SES=$(fm_backend_zellij_container_ensure) || exit 1
-    ZELLIJ_TASK_IDS=$(fm_backend_zellij_create_task "$ZELLIJ_SES" "$W" "$PROJ_ABS") || exit 1
+    ZELLIJ_TASK_IDS=$(fm_backend_zellij_create_task "$ZELLIJ_SES" "$W" "$SPAWN_CWD") || exit 1
     read -r ZELLIJ_TAB_ID ZELLIJ_PANE_ID <<EOF
 $ZELLIJ_TASK_IDS
 EOF
@@ -2122,7 +2176,7 @@ EOF
     ;;
   cmux)
     fm_backend_cmux_container_ensure || exit 1
-    CMUX_TASK_IDS=$(fm_backend_cmux_create_task "$W" "$PROJ_ABS") || exit 1
+    CMUX_TASK_IDS=$(fm_backend_cmux_create_task "$W" "$SPAWN_CWD") || exit 1
     read -r CMUX_WORKSPACE_ID CMUX_SURFACE_ID <<EOF
 $CMUX_TASK_IDS
 EOF
@@ -2282,56 +2336,31 @@ if [ "$RELAUNCH" -eq 1 ]; then
   fi
   [ "$KIND" = secondmate ] || validate_spawn_worktree "relaunch" "$T"
 elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
-  spawn_send_text_line "$WT_TARGET" 'treehouse get'
-
-  # Wait for the treehouse subshell: the pane's cwd moves from the project to the worktree.
-  # Target the stable window id, not the name: if the name is ever lost (e.g. an
-  # automatic-rename slips through), display-message -t <bad-name> falls back to the
-  # active client's window, which would misread firstmate's OWN pane path as the
-  # worktree and tangle a hook into the primary checkout. The window id never lies.
-  # Compare against PROJ_ABS_REAL (physical), not PROJ_ABS: a symlinked project
-  # prefix would otherwise make the pane's OS-level cwd read differ from
-  # PROJ_ABS on the very first poll, before the pane has actually moved.
-  #
-  # A single read that already differs from PROJ_ABS_REAL is not proof the pane
-  # settled there: on some tmux/WSL setups a brand-new window's pane_current_path
-  # transiently reports an unrelated stale path (seen live as another real git
-  # checkout entirely) before the shell catches up with treehouse get's cd. That
-  # stale path still passes the PROJ_ABS_REAL comparison and validate_spawn_worktree
-  # below (it resolves to a real, distinct worktree top-level too), so accepting it
-  # on one read alone silently records the wrong worktree= in state/<id>.meta. Require
-  # two consecutive reads to agree on the same non-project path before accepting it;
-  # a mismatch just becomes the new candidate rather than resetting the wait, so a
-  # pane that is already settled by the first real read only costs the one existing
-  # inter-poll sleep as confirmation, not a whole extra cycle on top.
-  candidate=""
-  for _ in $(seq 1 60); do
-    p=$(spawn_current_path "$WT_TARGET" || true)
-    if [ -n "$p" ]; then
-      p_real=$(real_path_or_raw "$p")
-      if [ "$p_real" != "$PROJ_ABS_REAL" ]; then
-        if [ -n "$candidate" ] && [ "$p_real" = "$candidate" ]; then
-          WT="$p"
-          break
-        fi
-        candidate="$p_real"
-      else
-        candidate=""
-      fi
-    else
-      candidate=""
-    fi
-    sleep 1
+  # A reclaimed husk pane keeps whatever cwd its previous incarnation had;
+  # enter the leased worktree explicitly before verifying.
+  if [ "$SPAWN_HERDR_RECLAIMED" = 1 ] && [ "$BACKEND" = herdr ]; then
+    spawn_send_text_line "$T" "cd -- $(shell_quote "$WT")"
+  fi
+  # Already leased and validated synchronously before terminal creation.
+  # Just verify the terminal pane path matches the leased path.
+  pane_path=""
+  for _ in $(seq 1 10); do
+    pane_path=$(spawn_current_path "$T" || true)
+    [ -n "$pane_path" ] && [ "$(real_path_or_raw "$pane_path")" = "$(real_path_or_raw "$WT")" ] && break
+    sleep 0.1
   done
-  if [ -z "$WT" ]; then
-    echo "error: treehouse get did not enter a worktree within 60s; inspect window $T" >&2
+  if [ -z "$pane_path" ] || [ "$(real_path_or_raw "$pane_path")" != "$(real_path_or_raw "$WT")" ]; then
+    # The lease is still unrecorded at this point, so the EXIT trap returns it.
+    echo "error: terminal pane path '${pane_path:-unknown}' does not match leased worktree '$WT'; inspect target $T" >&2
     exit 1
   fi
-
-  validate_spawn_worktree "treehouse get" "$T"
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
-  freshen_spawn_worktree_base "$WT" || exit 1
+  # For non-treehouse backends (like orca), the worktree is created during backend creation,
+  # so we freshen it afterwards. For treehouse, we already freshened it before creating the backend.
+  if [ "$BACKEND" = orca ]; then
+    freshen_spawn_worktree_base "$WT" || exit 1
+  fi
 fi
 
 # Per-task temp root: /tmp/fm-<id>/ with Go's build temp nested at gotmp/. Go won't
@@ -2702,7 +2731,7 @@ fi
 preserve_relaunch_meta() {
   awk -F= '
     BEGIN {
-      split("window endpoint_task_id worktree project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
+      split("window endpoint_task_id worktree treehouse_lease_id project harness kind mode yolo tasktmp model effort busy_gen spawn_gen traceparent backend herdr_session herdr_workspace_id herdr_tab_id herdr_pane_id zellij_session zellij_tab_id zellij_pane_id orca_worktree_id terminal cmux_workspace_id cmux_surface_id home projects control_relaunch_tx", keys, " ")
       for (i in keys) owned[keys[i]] = 1
     }
     !($1 in owned)
@@ -2712,6 +2741,7 @@ preserve_relaunch_meta() {
   echo "window=$META_WINDOW"
   echo "endpoint_task_id=$ID"
   echo "worktree=$WT"
+  [ -z "${TREEHOUSE_LEASE_ID:-}" ] || echo "treehouse_lease_id=$TREEHOUSE_LEASE_ID"
   echo "project=$PROJ_ABS"
   echo "harness=$HARNESS"
   echo "kind=$KIND"
@@ -2757,6 +2787,9 @@ preserve_relaunch_meta() {
     echo "control_relaunch_tx=$FM_CONTROL_RELAUNCH_TX"
   fi
 } > "$SPAWN_META_PATH"
+# The worktree and its lease id are durably recorded now; teardown owns the
+# lease from here, so the abort cleanup must not return it out from under that.
+TREEHOUSE_LEASE_UNRECORDED=
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_META_PUBLISH_STARTED=1
   mv -f "$SPAWN_META_TMP" "$STATE/$ID.meta"

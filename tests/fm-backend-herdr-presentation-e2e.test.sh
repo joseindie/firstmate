@@ -207,9 +207,9 @@ set -u
   done
   printf '\n'
 } >> "$TREEHOUSE_CALL_LOG"
-if [ -d "$POST_CREATE_ABORT_CONTROL" ] && [ "${1:-}" = get ]; then
-  exit 0
-fi
+# Post-create abort fixtures arm via the pane-get foreground_cwd rewrite below:
+# the lease acquisition succeeds for real, then the pane-vs-lease verification
+# sees the faked foreign cwd and aborts after the projection has been created.
 exec "$REAL_TREEHOUSE" "$@"
 SH
 
@@ -437,6 +437,7 @@ normalize_meta() {  # <meta>
     -e 's|^herdr_tab_id=.*$|herdr_tab_id=<herdr-container-id>|' \
     -e 's|^herdr_pane_id=.*$|herdr_pane_id=<herdr-container-id>|' \
     -e 's|^spawn_gen=.*$|spawn_gen=<spawn-incarnation>|' \
+    -e 's|^treehouse_lease_id=.*$|treehouse_lease_id=<treehouse-lease>|' \
     "$1"
 }
 
@@ -658,10 +659,34 @@ ACTIVE_SEEDED_TAB=$(cat "$ACTIVE_SEEDED_CONTROL/seeded-tab")
 ACTIVE_SEEDED_PANE=$(cat "$ACTIVE_SEEDED_CONTROL/seeded-pane")
 ACTIVE_SEEDED_TASK_PANE=$(cat "$ACTIVE_SEEDED_CONTROL/task-pane")
 ACTIVE_SEEDED_FOCUS="$ACTIVE_SEEDED_WSID/$ACTIVE_SEEDED_TAB"
-assert_focus_is "$ACTIVE_SEEDED_FOCUS" "active seeded-tab prune refusal"
+# The refusal itself preserves focus exactly (asserted by the seeded-prune-refusal
+# probes below). But an aborted lease-based spawn releases its worktree with
+# `treehouse return --force`, whose process sweep also ends the projection's own
+# seeded pane, so herdr then settles the captain onto the pre-spawn fixture space.
+# Assert the SETTLED state: poll until two consecutive reads agree, then require
+# the captain's fixture focus.
+settled_focus=""
+settle_prev=""
+for _ in $(seq 1 20); do
+  settle_now=$(focus_snapshot || printf ambiguous/ambiguous)
+  if [ -n "$settle_prev" ] && [ "$settle_now" = "$settle_prev" ]; then
+    settled_focus=$settle_now
+    break
+  fi
+  settle_prev=$settle_now
+  sleep 0.5
+done
+[ -n "$settled_focus" ] || settled_focus=$settle_prev
+[ "$settled_focus" = "$CAPTAIN_FOCUS" ] \
+  || fail "active seeded-tab prune refusal settled on '$settled_focus' instead of the captain's fixture focus '$CAPTAIN_FOCUS'"
 assert_raw_presentation_mutations_preserved_since "$ACTIVE_SEEDED_FOCUS_START" "active seeded-tab prune refusal"
-lab pane get "$ACTIVE_SEEDED_PANE" >/dev/null 2>&1 \
-  || fail "active seeded-tab refusal removed the exact seeded pane"
+# Lease-based abort cleanup returns the worktree with `treehouse return --force`,
+# whose process sweep ends the whole disposable single-task space: both the task
+# pane and this spawn's own seeded pane are gone, with no explicit close of the
+# refused active pane (asserted below).
+if lab pane get "$ACTIVE_SEEDED_PANE" >/dev/null 2>&1; then
+  fail "active seeded-tab failure left its seeded pane behind the lease release"
+fi
 if lab pane get "$ACTIVE_SEEDED_TASK_PANE" >/dev/null 2>&1; then
   fail "active seeded-tab failure did not abort-clean the non-active task pane"
 fi
@@ -841,22 +866,49 @@ if wait "$ABORT_A_PID"; then ABORT_A_STATUS=0; else ABORT_A_STATUS=$?; fi
 if wait "$ABORT_B_PID"; then ABORT_B_STATUS=0; else ABORT_B_STATUS=$?; fi
 finish_concurrent_expected_abort abort-a "$ABORT_A_STATUS" "$TMP_ROOT/abort-a.out" "$TMP_ROOT/abort-a.err"
 finish_concurrent_expected_abort abort-b "$ABORT_B_STATUS" "$TMP_ROOT/abort-b.out" "$TMP_ROOT/abort-b.err"
-grep -F "did not yield an isolated worktree" "$TMP_ROOT/abort-a.err" >/dev/null 2>&1 \
+grep -F "does not match leased worktree" "$TMP_ROOT/abort-a.err" >/dev/null 2>&1 \
   || fail "post-create abort fixture A did not reach the armed validation failure"
-grep -F "did not yield an isolated worktree" "$TMP_ROOT/abort-b.err" >/dev/null 2>&1 \
+grep -F "does not match leased worktree" "$TMP_ROOT/abort-b.err" >/dev/null 2>&1 \
   || fail "post-create abort fixture B did not reach the armed validation failure"
 ABORT_A_PANE=$(cat "$POST_CREATE_ABORT_CONTROL/abort-a/task-pane")
 ABORT_B_PANE=$(cat "$POST_CREATE_ABORT_CONTROL/abort-b/task-pane")
-ABORT_SEQUENCE=$(sed -n "$((ABORT_FOCUS_START + 1)),\$p" "$FOCUS_AUDIT_LOG" | awk -F '\t' -v a="$ABORT_A_PANE" -v b="$ABORT_B_PANE" '
-  $1 == "workspace-create" && $4 ~ /^└ abort-a · p:/ { print "create-a" }
-  $1 == "workspace-create" && $4 ~ /^└ abort-b · p:/ { print "create-b" }
-  $1 == "pane-close" && $4 == a { print "close-a" }
-  $1 == "pane-close" && $4 == b { print "close-b" }
+ABORT_A_WS=$(cat "$POST_CREATE_ABORT_CONTROL/abort-a/workspace")
+ABORT_B_WS=$(cat "$POST_CREATE_ABORT_CONTROL/abort-b/workspace")
+# Each fixture's create-through-cleanup span holds the session presentation
+# lock, so its audited rows must form one contiguous block. The closing transport
+# may be either an explicit focus-preserving close or the hardened death-close
+# (shell-pid kill behind an emptying workspace.move), so a fixture's rows are its
+# create, any pane close of its task pane, and any workspace.move of its
+# projected workspace; cleanup counts only when one of those closing markers ran.
+ABORT_SEQUENCE=$(sed -n "$((ABORT_FOCUS_START + 1)),\$p" "$FOCUS_AUDIT_LOG" | awk -F '\t' \
+  -v aw="$ABORT_A_WS" -v ap="$ABORT_A_PANE" -v bw="$ABORT_B_WS" -v bp="$ABORT_B_PANE" '
+  function attrib() {
+    if ($1 == "workspace-create" && $4 ~ /^└ abort-a · p:/) return "a"
+    if ($1 == "workspace-create" && $4 ~ /^└ abort-b · p:/) return "b"
+    if ($1 == "pane-close" && $4 == ap) return "a"
+    if ($1 == "pane-close" && $4 == bp) return "b"
+    if ($1 == "workspace-move" && $4 == aw) return "a"
+    if ($1 == "workspace-move" && $4 == bw) return "b"
+    return ""
+  }
+  {
+    who = attrib()
+    if (who != "" && who != last) { order = order who; last = who }
+    if (who != "" && ($1 == "pane-close" || $1 == "workspace-move")) closed[who] = 1
+  }
+  END { printf "%s|%s|%s\n", order, closed["a"] ? "closed-a" : "unclosed-a", closed["b"] ? "closed-b" : "unclosed-b" }
 ')
-case "$ABORT_SEQUENCE" in
-  $'create-a\nclose-a\ncreate-b\nclose-b'|$'create-b\nclose-b\ncreate-a\nclose-a') ;;
-  *) fail "concurrent post-create abort cleanup interleaved outside the presentation lock: $ABORT_SEQUENCE" ;;
+ABORT_ORDER=${ABORT_SEQUENCE%%|*}
+ABORT_CLOSED=${ABORT_SEQUENCE#*|}
+case "$ABORT_ORDER" in
+  ab|ba) ;;
+  *)
+    echo "DEBUG: ABORT_ORDER is:" >&2
+    echo "$ABORT_ORDER" >&2
+    fail "concurrent post-create abort cleanup interleaved outside the presentation lock: $ABORT_ORDER" ;;
 esac
+[ "$ABORT_CLOSED" = "closed-a|closed-b" ] \
+  || fail "concurrent post-create abort cleanup did not close both fixtures under the presentation lock: $ABORT_CLOSED"
 ABORT_UNRESTORED=$(sed -n "$((ABORT_FOCUS_START + 1)),\$p" "$FOCUS_AUDIT_LOG" | awk -F '\t' -v a="$ABORT_A_PANE" -v b="$ABORT_B_PANE" '
   ($1 == "workspace-create" || $1 == "tab-create" || $1 == "workspace-move" || ($1 == "pane-close" && $4 != a && $4 != b)) && $2 != $3 { print }
 ')

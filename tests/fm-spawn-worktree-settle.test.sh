@@ -86,6 +86,8 @@ read_settle_record() {
   IFS='|' read -r _ HOME_DIR PROJ_DIR WT_DIR STALE_DIR FAKEBIN_DIR COUNTFILE STALE_READS <<EOF
 $1
 EOF
+  WT_DIR=$(cd "$WT_DIR" 2>/dev/null && pwd || echo "$WT_DIR")
+  STALE_DIR=$(cd "$STALE_DIR" 2>/dev/null && pwd || echo "$STALE_DIR")
 }
 
 run_settle_spawn() {

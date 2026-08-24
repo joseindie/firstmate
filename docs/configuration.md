@@ -353,6 +353,16 @@ Malformed JSON, an empty or malformed rule/default array, an unverified harness,
 While the file remains present, no crewmate or scout spawn may proceed without an explicit resolved harness; malformed configuration must be reported and corrected rather than selected around.
 Secondmate homes inherit this file from the primary, so a secondmate's own crewmates apply the same dispatch profile behavior.
 
+## Treehouse pool configuration (config/treehouse-pool-size / config/treehouse-prewarm-count)
+
+The local, gitignored files under the `config/` directory control Treehouse worktree pool dimensions and prewarming behavior.
+`config/treehouse-pool-size` contains a single integer defining the global default maximum number of worktrees per pool.
+Firstmate injects this value via the `TREEHOUSE_MAX_TREES` environment variable when invoking the Treehouse CLI, serving as a fleet-wide fallback when no project-specific override exists.
+Project-specific pool limits stay in the project's native `treehouse.toml` file as `max_trees` and take precedence.
+`config/treehouse-prewarm-count` contains a single integer defining how many worktrees the background daemon should actively keep warm per project.
+The default prewarm count is 2 when the file is absent.
+Prewarming is run asynchronously and off the critical path in the session-start deferred network stage or heartbeat cron.
+
 ## Toolchain
 
 On session start the first mate detects what its required toolchain is missing or too old and lists each problem with either an exact install command or manual instructions.

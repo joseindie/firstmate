@@ -109,6 +109,8 @@ read_case_record() {
   IFS='|' read -r CASE_DIR HOME_DIR PROJ_DIR WT_DIR FAKEBIN_DIR LAUNCH_LOG <<EOF
 $1
 EOF
+  WT_DIR=$(cd "$WT_DIR" 2>/dev/null && pwd || echo "$WT_DIR")
+  CASE_DIR=$(cd "$CASE_DIR" 2>/dev/null && pwd || echo "$CASE_DIR")
 }
 
 assert_meta_profile() {

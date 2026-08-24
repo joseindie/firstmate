@@ -82,7 +82,13 @@ make_case() {
   # run; the ALLOW cases need them so the script can complete cleanly.
   cat > "$fakebin/treehouse" <<'SH'
 #!/usr/bin/env bash
-# `treehouse return --force <wt>`: succeed silently.
+# Log treehouse return/destroy calls to treehouse.log
+args="$*"
+for arg in "$@"; do
+  if [[ "$arg" == */wt ]]; then
+    echo "treehouse $args" >> "$(dirname "$arg")/treehouse.log"
+  fi
+done
 exit 0
 SH
   cat > "$fakebin/tmux" <<'SH'
@@ -633,6 +639,7 @@ test_local_only_truly_unpushed_refuses() {
 
   expect_code 1 "$rc" "truly-unpushed: teardown should refuse"
   grep -q REFUSED "$case_dir/stderr" || fail "truly-unpushed: no REFUSED line in stderr"
+  [ ! -f "$case_dir/treehouse.log" ] || fail "truly-unpushed: treehouse was called before safety check refused"
   pass "local-only worktree with truly unpushed work is refused (safety preserved)"
 }
 
@@ -1563,12 +1570,18 @@ SH
       ;;
   esac
   rc=0
-  FM_ROOT_OVERRIDE="$ROOT" FM_STATE_OVERRIDE="$case_dir/state" FM_CONFIG_OVERRIDE="$case_dir/config" \
+  FM_ROOT_OVERRIDE="$case_dir/test-root" FM_STATE_OVERRIDE="$case_dir/state" FM_CONFIG_OVERRIDE="$case_dir/config" \
     FM_FAKE_HERDR_LOG="$log" FM_FAKE_HERDR_CLOSED="$closed" \
     FM_FAKE_HERDR_SESSION_LIST_GARBAGE="$([ "$mode" = unresolvable-lock ] && printf 1 || printf 0)" \
     PATH="$case_dir/fakebin:$PATH" \
     "$teardown_bin" task-x1 --force > "$case_dir/stdout" 2> "$case_dir/stderr" || rc=$?
-  [ "$rc" -ne 0 ] || fail "herdr-preflight-$mode: teardown continued without its required preflight"
+  if [ "$rc" -eq 0 ]; then
+    echo "STDOUT:"
+    cat "$case_dir/stdout"
+    echo "STDERR:"
+    cat "$case_dir/stderr"
+    fail "herdr-preflight-$mode: teardown continued without its required preflight"
+  fi
   assert_grep "nothing was changed" "$case_dir/stderr" \
     "herdr-preflight-$mode: the retryable pre-return refusal was not explained visibly"
   [ -d "$case_dir/wt" ] || fail "herdr-preflight-$mode: refusal removed the isolated copy"

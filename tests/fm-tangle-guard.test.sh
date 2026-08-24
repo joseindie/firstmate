@@ -243,6 +243,7 @@ test_spawn_tmux_window_construction() {
   : > "$rec"
   wt="$TMP_ROOT/spawn-rec-wt"
   git -C "$proj" worktree add -q --detach "$wt" >/dev/null 2>&1
+  wt=$(cd "$wt" 2>/dev/null && pwd || echo "$wt")
 
   out=$(run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
   expect_code 0 "$status" "spawn into a genuine worktree should succeed"
@@ -260,11 +261,9 @@ test_spawn_tmux_window_construction() {
   assert_grep "set-window-option -t @spawnwid allow-rename off" "$rec" \
     "must disable allow-rename on the spawned window"
 
-  # Bug 2 fix (b): treehouse-get and the worktree wait loop target the stable id.
-  assert_grep "send-keys -t @spawnwid treehouse get Enter" "$rec" \
-    "treehouse get must be sent to the stable window id"
-  assert_grep "display-message -p -t @spawnwid #{pane_current_path}" "$rec" \
-    "the worktree wait loop must query the stable window id, not the name"
+  # Bug 2 fix (b): tmux window is created directly in the leased worktree CWD.
+  assert_grep "new-window -dP -F #{window_id} -t firstmate: -n fm-rec-win-gg7 -c $wt" "$rec" \
+    "new-window must start in the leased worktree CWD"
 
   pass "fm-spawn: appends windows by session-colon, pins the name, and targets the window id"
 }
