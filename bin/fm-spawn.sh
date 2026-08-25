@@ -1963,7 +1963,7 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
     echo "error: treehouse pool exhausted; could not lease worktree" >&2
     exit 1
   fi
-  WT=$(echo "$WT_JSON" | jq -r '.path')
+  WT=$(real_path_or_raw "$(echo "$WT_JSON" | jq -r '.path')")
   TREEHOUSE_LEASE_ID=$(echo "$WT_JSON" | jq -r '.lease_id')
   if [ -z "$WT" ] || [ -z "$TREEHOUSE_LEASE_ID" ]; then
     printf 'failed: treehouse lease parse failed\n' >> "$STATE/$ID.status"

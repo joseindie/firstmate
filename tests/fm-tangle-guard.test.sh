@@ -243,7 +243,7 @@ test_spawn_tmux_window_construction() {
   : > "$rec"
   wt="$TMP_ROOT/spawn-rec-wt"
   git -C "$proj" worktree add -q --detach "$wt" >/dev/null 2>&1
-  wt=$(cd "$wt" 2>/dev/null && pwd || echo "$wt")
+  wt=$(cd "$wt" 2>/dev/null && pwd -P || echo "$wt")
 
   out=$(run_spawn_record "$home" rec-win-gg7 "$proj" "$wt" "$fakebin" "$rec"); status=$?
   expect_code 0 "$status" "spawn into a genuine worktree should succeed"

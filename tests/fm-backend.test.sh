@@ -785,7 +785,18 @@ esac
 exit 0
 SH
   chmod +x "$fb/tmux"
-  fm_fake_exit0 "$fb" treehouse
+  # Deterministic treehouse lease stub: echo the known worktree instead of
+  # searching the filesystem for it (the shared fm_fake_exit0 search cannot
+  # reconstruct $wt verbatim and can match a sibling case's *wt* dir).
+  cat > "$fb/treehouse" <<SH
+#!/usr/bin/env bash
+if [ "\${1:-}" = get ]; then
+  printf '{"path":"%s","lease_id":"mock-lease-id"}\n' "$wt"
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fb/treehouse"
   printf '%s\n' "$fb"
 }
 
@@ -887,10 +898,15 @@ run_spawn_symlink_case() {  # <label> <physical|logical>
   mkdir -p "$state" "$config"
   log="$TMP_ROOT/symlink-spawn-$label.log"
 
-  out=$(run_spawn_case "$ROOT" "$fb" "$log" "$state" "$data" "$config" "$proj" -- "$id" "$proj" claude --mode no-mistakes --yolo off 2>&1)
+  # FM_FAKE_PANE_PATH hands the stub the exact worktree path (its filesystem
+  # search cannot reconstruct TMP_ROOT verbatim behind macOS's trailing-slash
+  # TMPDIR and symlinked /tmp), and the needle asserts the PHYSICALLY-resolved
+  # worktree: fm-spawn.sh must record the real path, not the reported string.
+  wt_real=$(cd "$wt" && pwd -P)
+  out=$(FM_FAKE_PANE_PATH="$wt" run_spawn_case "$ROOT" "$fb" "$log" "$state" "$data" "$config" "$proj" -- "$id" "$proj" claude --mode no-mistakes --yolo off 2>&1)
   rc=$?
   expect_code 0 "$rc" "fm-spawn.sh should succeed for a project reached through a symlinked prefix when the backend reports $first_reply cwd"$'\n'"$out"
-  assert_contains "$out" "worktree=$wt" \
+  assert_contains "$out" "worktree=$wt_real" \
     "fm-spawn.sh did not resolve a symlinked-prefix project to its real worktree when the backend reports $first_reply cwd"
 
   rm -rf "/tmp/fm-$id"
