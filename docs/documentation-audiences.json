@@ -249,6 +249,10 @@
       "audience": "agent-runtime"
     },
     {
+      "path": "config/NOTES.md",
+      "audience": "operator-current"
+    },
+    {
       "path": "CONTRIBUTING.md",
       "audience": "maintainer-architecture"
     },
@@ -459,6 +463,10 @@
     {
       "path": "docs/zellij-backend.md",
       "audience": "operator-current"
+    },
+    {
+      "path": "skills/RESOLVER.md",
+      "audience": "agent-runtime"
     },
     {
       "path": "skills/stow/SKILL.md",
