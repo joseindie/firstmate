@@ -689,7 +689,6 @@ case "$PROVIDER" in
     exit 2
     ;;
 esac
-
 # Reached only after the forge confirmed the merge landed: set -e exits on a
 # refused or failed merge above, and a queued forge merge exits without an
 # outcome while its existing poll remains armed.
@@ -705,3 +704,8 @@ case "$outcome_rc" in
     printf 'actionable: merged %s but could not record the outcome for supervision\n' "$URL" >&2
     ;;
 esac
+
+# Federation SHA-256 audit chain: durable, tamper-evident record of the merge,
+# orthogonal to the supervision-branch outcome report above.
+# ponytail: keep both controls - audit ledger vs branch dedup serve different ends.
+"$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" firstmate pr_merged "task=$ID" "pr=$URL" "commit=${FM_PR_MERGE_HEAD:-unknown}" || true

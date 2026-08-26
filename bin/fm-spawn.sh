@@ -651,6 +651,7 @@ spawn_remote_secondmate() {
     return 1
   fi
   echo "spawned $id harness=$harness kind=secondmate mode=secondmate yolo=off window=remote:$id worktree=$home remote=$host backend=$remote_backend"
+  "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" firstmate task_spawn "task=$id" "repo=$home" "mode=secondmate" "backend=$remote_backend" || true
   return 0
 }
 
@@ -2954,3 +2955,4 @@ fi
 SPAWN_DELIVERY=
 [ -z "$MODE" ] || SPAWN_DELIVERY=" mode=$MODE yolo=$YOLO"
 echo "spawned $ID harness=$HARNESS kind=$KIND$SPAWN_DELIVERY window=$META_WINDOW worktree=$WT"
+"$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" firstmate task_spawn "task=$ID" "repo=${PROJ_ABS:-$WT}" "mode=${MODE:-default}" "backend=${BACKEND:-tmux}" || true

@@ -2823,4 +2823,5 @@ if [ -d "$STATE" ]; then
   "$SCRIPT_DIR/fm-home-summary-refresh.sh" --best-effort || true
 fi
 echo "teardown $ID complete (window $T, worktree $WT)"
+"$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" firstmate task_teardown "task=$ID" || true
 backlog_refresh_reminder

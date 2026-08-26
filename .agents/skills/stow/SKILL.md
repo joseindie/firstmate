@@ -262,6 +262,35 @@ The first pass after adoption performs a one-time revalidation sweep of editable
 - Only an entry that already carried `<!--g-->` when this invocation began is on the next-pass branch: replace that marker with the normal dated tier marker if independent current-session evidence confirms the entry; otherwise archive it with provenance `legacy-unvalidated`.
 - The grace period is one full stow cycle, not a time window, and the same persisted transition applies when a hand edit later leaves an entry unmarked in `data/learnings.md`.
 
+## Watermark cursor tracking
+
+Each `/stow` pass records a per-file watermark cursor in `data/stow-cursor.md` so a subsequent pass can resume from the last-reviewed position rather than re-scanning the entire file from the beginning.
+
+### Cursor format
+
+```markdown
+<!-- stow-cursor: last-reviewed=<ISO-DATE> file=<basename> line=<N> entry-hash=<SHA256-8> -->
+```
+
+- `last-reviewed` - the ISO-8601 date of the pass that wrote this cursor.
+- `file` - the memory file basename (`captain.md`, `captain-shared.md`, `learnings.md`).
+- `line` - the 1-based line number of the last entry fully evaluated during the pass.
+- `entry-hash` - the first 8 hex characters of the SHA-256 of the entry's canonical text (marker-stripped), used to detect drift between passes.
+
+### Cursor lifecycle
+
+1. **Read cursor** at pass start: if `data/stow-cursor.md` exists and the cursor's `file` matches a file being processed, resume evaluation from `line + 1` instead of line 1. If the cursor's `entry-hash` does not match the entry at the stored line, the file has drifted and the full pass restarts from line 1.
+2. **Advance cursor** after each entry is evaluated: update `line` to the current entry's line number and `entry-hash` to the entry's current hash. Only advance when the entry has been fully judged (reinforced, archived, retiered, or confirmed current).
+3. **Persist cursor** at pass end: write all three file cursors atomically to `data/stow-cursor.md` before writing the completion receipt. If the pass is interrupted before completion, the cursor file is left unchanged (last successful pass's position).
+4. **Diff-grounded verification**: before advancing a cursor, verify that the entry at the stored line actually matches the stored hash. If it does not, the file was edited outside the pass and the cursor is invalidated (full rescan). This prevents a stale cursor from skipping entries that changed between passes.
+
+### Cursor scope
+
+- Cursors are per-file, not per-pass: each of the three memory files gets its own cursor line.
+- The cold tier (`data/memory-archive.md`) is append-only and never needs a cursor.
+- A secondmate home inherits no cursors from the primary; each home tracks its own.
+- Deleting `data/stow-cursor.md` forces a full pass on the next invocation, which is the correct recovery when cursors are suspected stale.
+
 ## Completion receipt
 
 Report the outcome in plain captain-facing language with all of these facts:
