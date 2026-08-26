@@ -105,6 +105,9 @@ exit 0
 SH
   chmod +x "$fakebin/tmux"
   cp "$(command -v bash)" "$fakebin/muse-bin-test-version"
+  if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+    codesign -s - -f "$fakebin/muse-bin-test-version" >/dev/null 2>&1 || true
+  fi
   cat > "$fakebin/muse" <<'SH'
 #!/usr/bin/env bash
 set -u
@@ -175,6 +178,9 @@ test_detects_versioned_process_ancestor() {
   mkdir -p "$dir"
   for bin in muse-bin-0.1.0-R708.1 muse-bin-9.9.9-RZZZ.9 muse; do
     cp "$(command -v bash)" "$dir/$bin"
+    if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+      codesign -s - -f "$dir/$bin" >/dev/null 2>&1 || true
+    fi
     out=$(env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
       -u CURSOR_AGENT -u CURSOR_INVOKED_AS \
       "$dir/$bin" -c "r=\$(\"$HARNESS\"); printf '%s' \"\$r\"")
@@ -191,6 +197,9 @@ test_detection_is_anchored() {
   mkdir -p "$dir"
   for bin in musescore amuse notmuse-bin muse-binary muse-bind; do
     cp "$(command -v bash)" "$dir/$bin"
+    if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+      codesign -s - -f "$dir/$bin" >/dev/null 2>&1 || true
+    fi
     out=$(env -u CLAUDECODE -u PI_CODING_AGENT -u FM_PI_HARNESS -u GROK_AGENT \
       -u CURSOR_AGENT -u CURSOR_INVOKED_AS \
       "$dir/$bin" -c "r=\$(\"$HARNESS\"); printf '%s' \"\$r\"")
@@ -401,7 +410,8 @@ test_spawn_writes_busy_binding_and_teardown_removes_it() {
   IFS='|' read -r case_dir home proj wt fakebin id <<EOF
 $rec
 EOF
-  prior=$(write_session_log "$case_dir/xdgdata/muse/sessions" 2026 08 05 prior "$wt" </dev/null)
+  wt_real=$(cd "$wt" && pwd -P)
+  prior=$(write_session_log "$case_dir/xdgdata/muse/sessions" 2026 08 05 prior "$wt_real" </dev/null)
   prior=$(printf '%s\n' "$prior" | sed 's://*:/:g')
   FM_TEST_MUSE_DATA_HOME="$case_dir/xdgdata" \
     run_muse_spawn "$home" "$proj" "$wt" "$fakebin" "$id" --mode no-mistakes --yolo off >/dev/null \
@@ -411,7 +421,7 @@ EOF
   assert_present "$binding" "muse spawn did not write the session binding"
   assert_grep "sessions_root=$case_dir/xdgdata/muse/sessions" "$binding" \
     "muse binding did not record the resolved sessions root"
-  assert_grep "workspace_root=$wt" "$binding" "muse binding did not record the task worktree"
+  assert_grep "workspace_root=$wt_real" "$binding" "muse binding did not record the task worktree"
   assert_grep "prior_log=$prior" "$binding" \
     "muse binding did not exclude the pre-existing session: $(tr '\n' ';' < "$binding")"
   # No busy record is armed for muse: the source is pull-only with no writer, so
