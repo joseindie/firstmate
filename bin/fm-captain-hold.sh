@@ -441,7 +441,7 @@ command_hold() {
   show=$(task_show "$id") || fail "task $id disappeared while holding it"
   hold_kind=$(show_field_value "$show" hold_kind)
   [ "$hold_kind" = captain ] || fail "task $id did not retain its captain hold"
-  "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=held" || true
+  "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=held" >/dev/null 2>&1 || true
   printf '%s\n' "$id"
 }
 
@@ -540,7 +540,7 @@ command_answer() {
         answered) [ "$release" = 0 ] || fail "task $id records this answer as a close; retry without --release" ;;
       esac
       close_answered "$id" "$release"
-      "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=$outcome" || true
+      "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=$outcome" >/dev/null 2>&1 || true
       printf '%s: %s\n' "$outcome" "$id"
       return 0
     fi
@@ -549,7 +549,7 @@ command_answer() {
     show=$(task_show "$id") || fail "task $id disappeared after closing"
     body_has_resolution_record "$(show_field "$show" body)" \
       || fail "captain-held task $id did not retain its durable resolution record"
-    "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=$outcome" || true
+    "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=$outcome" >/dev/null 2>&1 || true
     printf '%s: %s\n' "$outcome" "$id"
     return 0
   fi
@@ -561,7 +561,7 @@ command_answer() {
       || fail "task $id records a different captain decision with mode ${recorded_mode:-unknown}"
     [ "$recorded_mode" = released ] && [ "$release" = 1 ] \
       || fail "task $id records this answer with mode ${recorded_mode:-unknown}; replay requires matching --release"
-    "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=replayed" || true
+    "$SCRIPT_DIR/fm-audit.sh" append "$STATE/audit.jsonl" captain hold_resolved "task=$id" "decision=replayed" >/dev/null 2>&1 || true
     printf 'released: %s\n' "$id"
     return 0
   fi
