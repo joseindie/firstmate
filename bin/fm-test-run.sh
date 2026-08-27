@@ -1978,7 +1978,15 @@ run_one_serial() {
 
   set +e
   # Stream live output while retaining a copy for gate-skip detection.
-  run_script_bounded "$script" "$out" 1 "s$TOTAL"
+  # PIPESTATUS[0] is the test script; tee's exit is ignored for aggregate.
+  # Run inside an isolation subshell so ambient FM_*_OVERRIDE / FM_BACKEND
+  # never leak into the batch environment (fm-spawn-batch contract).
+  (
+    unset FM_HOME FM_STATE_OVERRIDE FM_DATA_OVERRIDE FM_ROOT_OVERRIDE \
+      FM_PROJECTS_OVERRIDE FM_CONFIG_OVERRIDE FM_BACKEND 2>/dev/null || true
+    cd "$ROOT" || exit 1
+    run_script_bounded "$script" "$out" 1 "s$TOTAL"
+  )
   rc=$?
   set -e
   : "${rc:=1}"
