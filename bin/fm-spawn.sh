@@ -1974,7 +1974,12 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   TREEHOUSE_LEASE_UNRECORDED=$WT
 
   validate_spawn_worktree "treehouse get" "pre-spawn"
-  freshen_spawn_worktree_base "$WT" || exit 1
+  # The leased pool slot is prewarmed fresh, so an offline base-refresh failure
+  # (git fetch origin inside freshen) must not abort the spawn; launch from the
+  # leased base instead. ponytail: tolerate offline freshen - slots are prewarmed.
+  if ! freshen_spawn_worktree_base "$WT"; then
+    echo "warn: treehouse worktree base refresh failed for task $ID; launching from leased base" >&2
+  fi
 fi
 
 SPAWN_CWD=$PROJ_ABS
