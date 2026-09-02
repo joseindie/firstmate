@@ -109,6 +109,10 @@
   ],
   "surfaces": [
     {
+      "path": ".agent-tasks/plane-strategic-layer/README.md",
+      "audience": "operator-example"
+    },
+    {
       "path": ".agents/skills/afk/SKILL.md",
       "audience": "agent-runtime"
     },

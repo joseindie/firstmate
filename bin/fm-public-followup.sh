@@ -141,8 +141,8 @@ PF_TEMP_FILES=()
 PF_REGISTRY_LOCK_IDS=()
 pf_registry_lock_held() {
   local wanted=$1 held
-  [ "${#PF_REGISTRY_LOCK_IDS[@]}" -eq 0 ] && return 1
-  for held in "${PF_REGISTRY_LOCK_IDS[@]}"; do
+  # bash 3.2 + set -u treats "${arr[@]}" on an empty array as unbound.
+  for held in ${PF_REGISTRY_LOCK_IDS[@]+"${PF_REGISTRY_LOCK_IDS[@]}"}; do
     [ "$held" = "$wanted" ] && return 0
   done
   return 1
@@ -158,7 +158,7 @@ pf_registry_lock_release() {
   local -a remaining=()
   pf_registry_lock_held "$id" || return 0
   fm_pf_registry_lock_release "$STATE" "$id"
-  for held in "${PF_REGISTRY_LOCK_IDS[@]}"; do
+  for held in ${PF_REGISTRY_LOCK_IDS[@]+"${PF_REGISTRY_LOCK_IDS[@]}"}; do
     [ "$held" = "$id" ] || remaining+=("$held")
   done
   PF_REGISTRY_LOCK_IDS=(${remaining[@]+"${remaining[@]}"})
