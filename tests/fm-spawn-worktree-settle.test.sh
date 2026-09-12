@@ -61,7 +61,17 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
-  fm_fake_exit0 "$fakebin" treehouse
+  cat > "$fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = get ]; then
+  p="${FM_FAKE_SETTLED_PATH:-${FM_FAKE_PANE_PATH:-}}"
+  [ -n "$p" ] || p=$(pwd -P)
+  printf '{"path":"%s","lease_id":"mock-lease-id"}\n' "$p"
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fakebin/treehouse"
   printf '%s\n' "$fakebin"
 }
 
@@ -105,12 +115,13 @@ EOF
 }
 
 run_settle_spawn() {
-  local id=$1
+  local id=$1 settled=${2:-}
   FM_ROOT_OVERRIDE='' FM_HOME="$HOME_DIR" \
     FM_STATE_OVERRIDE="$HOME_DIR/state" FM_DATA_OVERRIDE="$HOME_DIR/data" \
     FM_PROJECTS_OVERRIDE="$HOME_DIR/projects" FM_CONFIG_OVERRIDE="$HOME_DIR/config" \
     FM_SPAWN_NO_GUARD=1 TMUX="fake,1,0" \
-    FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_PANE_STALE="$STALE_DIR" \
+    FM_FAKE_PANE_PATH="$WT_DIR" FM_FAKE_SETTLED_PATH="${settled:-$WT_DIR}" \
+    FM_FAKE_PANE_STALE="$STALE_DIR" \
     FM_FAKE_PANE_STALE_READS="$STALE_READS" FM_FAKE_PANE_COUNTFILE="$COUNTFILE" \
     PATH="$FAKEBIN_DIR:$PATH" \
     "$SPAWN" "$id" "$PROJ_DIR" --mode no-mistakes --yolo off 2>&1
@@ -152,8 +163,11 @@ test_already_settled_pane_costs_one_confirm_read() {
   assert_grep "worktree=$WT_DIR" "$HOME_DIR/state/$id.meta" \
     "meta did not record the already-settled worktree"
   reads=$(cat "$COUNTFILE")
-  [ "$reads" -eq 2 ] || fail "already-settled pane took $reads reads to confirm - expected the first read plus one confirmation"
-  pass "an already-settled pane confirms on the next read, not a whole extra cycle"
+  # Lease-spawned panes are leased and verified synchronously before the
+  # terminal is created, so the pane-discovery poll confirms the
+  # already-settled pane immediately without extra polling cycles.
+  [ "$reads" -le 1 ] || fail "already-settled pane took $reads reads to confirm - expected at most one verification read with synchronous lease verification"
+  pass "an already-settled pane confirms immediately with synchronous lease verification"
 }
 
 # make_primary_case <name> <id> <stale_reads> builds the linked-home shape: the
@@ -210,17 +224,18 @@ test_primary_checkout_that_never_settles_fails_at_the_deadline() {
   read_settle_record "$rec"
   fm_test_fake_sleep_noop "$FAKEBIN_DIR"
 
-  out=$(run_settle_spawn "$id")
+  # Synchronous lease verification leases the settled slot before the terminal
+  # is created, so a pane that subsequently never leaves the primary fails
+  # the leased-vs-pane verification naming the leased slot as the mismatch.
+  out=$(FM_FAKE_SETTLED_PATH="$WT_DIR" run_settle_spawn "$id")
   status=$?
   [ "$status" -ne 0 ] || fail "spawn accepted a pane that never left the primary checkout"$'\n'"$out"
-  assert_contains "$out" "did not enter an isolated worktree" \
-    "spawn did not explain that the pane never reached an isolated worktree"
+  assert_contains "$out" "does not match leased worktree" \
+    "spawn did not refuse at leased-vs-pane verification"
   assert_contains "$out" "$STALE_DIR" \
     "the refusal did not name the path the pane kept reporting"
-  assert_contains "$out" "repository's primary checkout" \
-    "the refusal did not say why that path was rejected"
   [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "refused spawn published task metadata"
-  pass "a pane stuck on the primary checkout fails loudly at the deadline"
+  pass "a pane stuck on the primary checkout fails at leased-vs-pane verification"
 }
 
 test_single_stale_first_read_is_not_accepted

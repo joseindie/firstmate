@@ -265,10 +265,6 @@
       "audience": "agent-runtime"
     },
     {
-      "path": "config/NOTES.md",
-      "audience": "operator-current"
-    },
-    {
       "path": "CONTRIBUTING.md",
       "audience": "maintainer-architecture"
     },
