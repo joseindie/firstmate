@@ -2725,8 +2725,11 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   fi
   TREEHOUSE_LEASE_UNRECORDED=$WT
 
+  # The base freshen mutates the slot's HEAD, so it runs only after the
+  # caller-ordered claim is verified below; validate first so a slot that
+  # fails isolation is refused before anything moves its HEAD.
   validate_spawn_worktree "treehouse get" "pre-spawn"
-  freshen_spawn_worktree_base "$WT" || exit 1
+  FRESHEN_DEFERRED=1
 fi
 
 SPAWN_CWD=$PROJ_ABS
@@ -3213,7 +3216,8 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
   # bin/fm-teardown.sh leave a slot that has since been reassigned untouched, so
   # a slot that cannot be claimed is refused here, at the cheapest point, rather
   # than launching a worker whose slot teardown could later release out from
-  # under its successor.
+  # under its successor. The claim must precede any slot mutation: freshening
+  # the base could otherwise move HEAD on a slot this task never proves to own.
   # Written under the Treehouse project lock held from before slot allocation
   # through metadata publication, so no other spawn or return sees a half-claim.
   if fm_treehouse_pool_slot "$PROJ_ABS" "$WT"; then
@@ -3226,8 +3230,12 @@ elif [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 fi
 if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ]; then
   # For non-treehouse backends (like orca), the worktree is created during backend creation,
-  # so we freshen it afterwards. For treehouse, we already freshened it before creating the backend.
-  if [ "$BACKEND" = orca ]; then
+  # so we freshen it afterwards. For treehouse, the base freshen was deferred past
+  # the synchronous lease validation and the slot-owner claim, so an unclaimable
+  # or non-isolated slot is refused before anything moves its HEAD.
+  if [ "${FRESHEN_DEFERRED:-0}" = 1 ]; then
+    freshen_spawn_worktree_base "$WT" || exit 1
+  elif [ "$BACKEND" = orca ]; then
     freshen_spawn_worktree_base "$WT" || exit 1
   fi
 fi

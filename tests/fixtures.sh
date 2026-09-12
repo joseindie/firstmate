@@ -258,7 +258,22 @@ fm_test_make_spawn_fakebin() {
   shift
   fakebin=$(fm_fakebin "$dir")
   fm_test_fake_tmux_spawn "$fakebin"
-  fm_fake_exit0 "$fakebin" treehouse "$@"
+  # Synchronous lease stub: echo the requested lease path as the leased
+  # identity, matching the synchronous `treehouse get --lease --json` contract
+  # in bin/fm-spawn.sh. FM_FAKE_LEASE_PATH selects the leased pool path
+  # (pane-discovery cases: POOL_DIR; primary cases: the stale primary).
+  cat > "$fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = get ]; then
+  p="${FM_FAKE_LEASE_PATH:-${FM_FAKE_SETTLED_PATH:-${FM_FAKE_PANE_PATH:-}}}"
+  [ -n "$p" ] || p=$(pwd -P)
+  printf '{"path":"%s","lease_id":"mock-lease-id"}\n' "$p"
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fakebin/treehouse"
+  fm_fake_exit0 "$fakebin" "$@"
   printf '%s\n' "$fakebin"
 }
 
@@ -292,6 +307,7 @@ fm_test_run_spawn() {
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$pane" TMUX="${TMUX:-fake,1,0}" \
+    FM_FAKE_LEASE_PATH="${FM_FAKE_LEASE_PATH:-${FM_TEST_LEASE_PATH:-$pane}}" \
     PATH="$fakebin:$PATH" \
     "$ROOT/bin/fm-spawn.sh" "$@" 2>&1
 }

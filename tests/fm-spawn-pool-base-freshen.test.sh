@@ -55,7 +55,19 @@ EOF
 run_spawn() {
   local id=$1
   shift
-  fm_test_run_spawn "$HOME_DIR" "$POOL_DIR" "$FAKEBIN_DIR" \
+  FM_FAKE_LEASE_PATH="$POOL_DIR" \
+    fm_test_run_spawn "$HOME_DIR" "$POOL_DIR" "$FAKEBIN_DIR" \
+    "$id" "$PROJECT_DIR" "$@"
+}
+
+# Lease-aware variant: report the returned pool path as the synchronous lease
+# while the pane continues to read POOL_DIR. run_spawn's own pane arg stays
+# POOL_DIR; only the lease identity differs.
+run_spawn_with_lease() {  # <lease-path> <id> [spawn args...]
+  local lease=$1 id=$2
+  shift 2
+  FM_TEST_LEASE_PATH="$lease" \
+    fm_test_run_spawn "$HOME_DIR" "$POOL_DIR" "$FAKEBIN_DIR" \
     "$id" "$PROJECT_DIR" "$@"
 }
 
@@ -116,7 +128,9 @@ test_linked_spawning_home_rejects_primary_before_refresh() {
     # The assertion concerns identity, not how long an unchanged cwd is polled.
     fm_test_fake_sleep_noop "$FAKEBIN_DIR"
 
-    out=$(run_spawn "$id" --scout)
+    # Synchronous lease verification leases POOL_DIR before the terminal is
+    # created, so pane and lease agree on the returned path under test.
+    out=$(FM_FAKE_LEASE_PATH="$POOL_DIR" run_spawn "$id" --scout)
     status=$?
     if [ "${FM_TEST_EVIDENCE:-0}" = 1 ]; then
       printf '# evidence begin: linked-home spawn, returned=%s\n' "$returned"
@@ -144,14 +158,11 @@ test_linked_spawning_home_rejects_primary_before_refresh() {
         || fail "spawn did not refresh the genuine scout copy"
     else
       [ "$status" -ne 0 ] || fail "linked spawning home accepted $returned as a disposable copy"
-      # None of these is an isolated copy, so the worktree poll never adopts one
-      # and the wait runs out instead: the spawning directory fails the poll's
-      # own project comparison, and the repository primary (named directly or
-      # through a symlink) fails the isolation screen the poll shares with the
-      # guard. The refusal names the last path the pane reported.
+      # None of these is an isolated copy, so the synchronous lease validation
+      # refuses it before any fetch or metadata. The refusal names the resolved
+      # lease path and why it was rejected.
       assert_contains "$out" "did not enter an isolated worktree" \
         "spawn did not explain its isolation refusal"
-      assert_contains "$out" "last seen" "refusal did not name the path the pane reported"
       [ ! -e "$HOME_DIR/state/$id.meta" ] || fail "refused spawn published task metadata"
       [ ! -e "$primary/.git/FETCH_HEAD" ] || fail "refused spawn fetched before proving isolation"
     fi

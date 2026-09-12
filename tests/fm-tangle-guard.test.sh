@@ -154,7 +154,8 @@ test_brief_assertion_precedes_branch() {
 run_spawn() {
   local home=$1 id=$2 proj=$3 pane=$4 fakebin=$5
   fm_test_spawn_brief "$home" "$id" brief
-  fm_test_run_spawn "$home" "$pane" "$fakebin" \
+  FM_TEST_LEASE_PATH="$pane" \
+    fm_test_run_spawn "$home" "$pane" "$fakebin" \
     "$id" "$proj" codex --mode no-mistakes --yolo off
 }
 
