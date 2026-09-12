@@ -332,7 +332,12 @@ focus_snapshot() {
 assert_focus_is() {  # <expected> <case-name>
   local expected=$1 case_name=$2 actual
   actual=$(focus_snapshot)
-  [ "$actual" = "$expected" ] || fail "$case_name changed active workspace/tab from $expected to $actual"
+  if [ "$actual" != "$expected" ]; then
+    echo "--- on-teardown.err ---" >&2; cat "$TMP_ROOT/on-teardown.err" 2>/dev/null >&2
+    echo "--- on-teardown.out ---" >&2; cat "$TMP_ROOT/on-teardown.out" 2>/dev/null >&2
+    echo "--- FOCUS_AUDIT_LOG ---" >&2; tail -n 20 "$FOCUS_AUDIT_LOG" 2>/dev/null >&2
+    fail "$case_name changed active workspace/tab from $expected to $actual"
+  fi
 }
 
 focus_audit_line_count() { wc -l < "$FOCUS_AUDIT_LOG" | tr -d '[:space:]'; }
