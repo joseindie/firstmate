@@ -2448,7 +2448,7 @@ spawn_worktree_isolated() {  # <path>
 validate_spawn_worktree() {  # <source> <inspect-target>
   local source=$1 inspect_target=$2
   if ! spawn_worktree_isolated "$WT"; then
-    echo "error: $source did not yield an isolated worktree (resolved '$WT'; worktree root '${SPAWN_WT_TOP:-none}'; reason: ${SPAWN_WT_REASON:-unknown}; spawning project '$PROJ_ABS'); refusing to launch to avoid tangling the primary checkout. Inspect target $inspect_target" >&2
+    echo "error: $source did not enter an isolated worktree ($source did not yield an isolated worktree; resolved '$WT'; worktree root '${SPAWN_WT_TOP:-none}'; reason: ${SPAWN_WT_REASON:-unknown}; spawning project '$PROJ_ABS'); refusing to launch to avoid tangling the primary checkout. Inspect target $inspect_target" >&2
     exit 1
   fi
 }

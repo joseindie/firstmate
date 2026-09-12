@@ -1579,7 +1579,7 @@ families_for_changed_path() {
     tests/*)
       printf '%s\n' "__unmapped__:$path"
       ;;
-    README.md|LICENSE|assets/*|docs/*|.gitignore|.agent-tasks/*|config/NOTES.md|AGENTS.md.*|skills/RESOLVER.md)
+    README.md|LICENSE|assets/*|docs/*|.gitignore|.agent-tasks/*|AGENTS.md.*|skills/RESOLVER.md)
       ;;
     *)
       if [ -e "$path" ]; then

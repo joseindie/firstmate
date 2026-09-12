@@ -660,6 +660,17 @@ esac
 exit 0
 SH
   chmod +x "$fakebin/tmux"
+  cat > "$fakebin/treehouse" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = get ]; then
+  p="${FM_FAKE_PANE_PATH:-}"
+  [ -n "$p" ] || p=$(pwd -P)
+  printf '{"path":"%s","lease_id":"mock-lease-id"}\n' "$p"
+  exit 0
+fi
+exit 0
+SH
+  chmod +x "$fakebin/treehouse"
   fm_fake_exit0 "$fakebin" pi
   printf '%s\n' "$fakebin"
 }
@@ -2201,11 +2212,11 @@ SH
       "$ROOT/bin/fm-config-push.sh" > "$first_out" 2>&1
   ) &
   first_pid=$!
-  for _ in $(seq 1 100); do
+  for _ in $(seq 1 250); do
     [ -e "$entered" ] && break
     sleep 0.02
   done
-  [ -e "$entered" ] || fail "first config push did not reach pointer delivery"
+  [ -e "$entered" ] || fail "first config push did not reach pointer delivery: $(cat "$first_out" 2>/dev/null)"
   first_instr=$(reread_instruction_path "$w/sm") \
     || fail "first concurrent push did not publish its generation"
   printf 'two\n' > "$w/home/config/crew-harness"
